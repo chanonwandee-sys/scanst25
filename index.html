@@ -1,6 +1,9 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>สแกนสินค้า</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
 <style>
 /* Layout: one column for a handheld (about 360x640). Sticky counter bar, one large result card, then the scanned list.
@@ -34,6 +37,7 @@
   --danger: #ff8a80; --on-accent: #06130d; color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 16px; line-height: 1.45;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
@@ -59,7 +63,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .stat span { font-size: .72rem; color: var(--ink-2); }
 
 /* scan input */
-.scanbox { margin-top: 14px; display: grid; gap: 8px; }
+.scanbox { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .field-label { font-size: .8rem; font-weight: 600; color: var(--ink-2); letter-spacing: .04em; }
 .scan-row { display: flex; gap: 8px; }
 #scan {
@@ -77,6 +81,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .zone-row { display: flex; align-items: center; gap: 8px; }
 #zone { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
 .linkrow { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* paper size */
+.sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.size { min-height: 56px; border: 2px solid var(--line); border-radius: 8px; background: var(--surface); display: grid; place-items: center; padding: 4px; line-height: 1.1; }
+.size b { font-family: var(--font-code); font-size: 1.4rem; font-weight: 600; }
+.size small { font-size: .7rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.size[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
+.size[aria-pressed="true"] small { color: var(--on-accent); }
+.badge { display: inline-block; font-family: var(--font-code); font-size: .8rem; font-weight: 600; padding: 1px 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line); margin-right: 6px; }
+.result .badge { background: var(--surface); }
+.hint { font-size: .75rem; color: var(--ink-2); margin: 0; }
 
 /* result card */
 .result { margin-top: 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); padding: 16px; display: grid; gap: 6px; border-left-width: 8px; border-left-color: var(--line); }
@@ -128,6 +143,8 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 @media (prefers-reduced-motion: no-preference) { .result { transition: background-color .15s; } }
 </style>
 
+</head>
+<body>
 <div class="bar"><div class="bar-in">
   <h1>สแกนสินค้า</h1>
   <div class="stat"><b id="cSku">0</b><span>รายการ</span></div>
@@ -145,6 +162,8 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
       <label class="field-label" for="zone">โซน/เอกสาร</label>
       <input id="zone" type="text" autocomplete="off" placeholder="เช่น ชั้น A-03 (ไม่บังคับ)">
     </div>
+    <div class="field-label" id="sizeLbl">ขนาดกระดาษ (ยิงบาร์โค้ด A3 / A4 / A5 / A6 เพื่อสลับได้)</div>
+    <div class="sizes" role="group" aria-labelledby="sizeLbl" id="sizes"></div>
   </section>
 
   <section id="result" class="result" aria-live="polite">
@@ -212,7 +231,8 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     "8850000000050": "ผงซักฟอก 2.4 กก.",
     "8850000000067": "กระดาษทิชชู่ (แพ็ก 6 ม้วน)"
   };
-  var state = { items: [], catalog: {}, zone: "", sound: true };
+  var SIZES = ["A3", "A4", "A5", "A6"];
+  var state = { items: [], catalog: {}, zone: "", sound: true, size: "A4" };
   var lastRemoved = null, toastTimer = 0, clearTimer = 0, ctx = null;
 
   function $(id) { return document.getElementById(id); }
@@ -224,9 +244,11 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
         if (s.catalog && typeof s.catalog === "object") state.catalog = s.catalog;
         if (typeof s.zone === "string") state.zone = s.zone;
         if (typeof s.sound === "boolean") state.sound = s.sound;
+        if (SIZES.indexOf(s.size) >= 0) state.size = s.size;
       }
     } catch (e) {}
   }
+  function migrate() { state.items.forEach(function (x) { if (SIZES.indexOf(x.size) < 0) x.size = "A4"; }); }
   function save() { try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) {} }
   function nameFor(code) {
     if (Object.prototype.hasOwnProperty.call(state.catalog, code)) return state.catalog[code];
@@ -262,26 +284,44 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   }
 
   /* scan */
+  function sizeFromCode(code) {
+    var m = String(code).trim().toUpperCase().match(/^(?:SIZE|PAPER)?[\s:_-]*(A[3-6])$/);
+    return m ? m[1] : "";
+  }
+  function setSize(sz, fromScan) {
+    state.size = sz; save(); renderSizes();
+    if (fromScan) {
+      var box = $("result");
+      box.className = "result ok";
+      $("rTag").textContent = "เปลี่ยนขนาดกระดาษ";
+      $("rName").textContent = "ขนาด " + sz;
+      $("rCode").textContent = "สินค้าที่สแกนต่อจากนี้จะนับเป็น " + sz;
+      $("rQty").hidden = true;
+      beep(false);
+    }
+  }
   function onScan(raw) {
     var code = String(raw || "").replace(/[\r\n\t]/g, "").trim();
     if (!code) return;
+    var sz = sizeFromCode(code);
+    if (sz) { setSize(sz, true); return; }
     var it = null, i;
-    for (i = 0; i < state.items.length; i++) if (state.items[i].code === code) { it = state.items[i]; break; }
+    for (i = 0; i < state.items.length; i++) if (state.items[i].code === code && state.items[i].size === state.size) { it = state.items[i]; break; }
     var repeat = !!it;
     if (it) { it.qty += 1; it.ts = Date.now(); }
-    else { it = { code: code, qty: 1, ts: Date.now() }; }
+    else { it = { code: code, size: state.size, qty: 1, ts: Date.now() }; }
     state.items = [it].concat(state.items.filter(function (x) { return x !== it; }));
     var name = nameFor(code);
-    showResult(code, name, it.qty, repeat);
+    showResult(code, name, it.qty, repeat, it.size);
     beep(!name);
-    save(); renderList();
+    save(); renderList(); renderSizes();
   }
-  function showResult(code, name, qty, repeat) {
+  function showResult(code, name, qty, repeat, size) {
     var box = $("result");
     box.className = "result " + (name ? "ok" : "warn");
     $("rTag").textContent = name ? (repeat ? "สแกนซ้ำ +1" : "เพิ่มรายการใหม่") : "ไม่พบในรายการสินค้า";
     $("rName").textContent = name || "สินค้าไม่มีชื่อในระบบ";
-    $("rCode").textContent = code;
+    $("rCode").textContent = size + " · " + code;
     var q = $("rQty"); q.hidden = false; q.textContent = String(qty);
     var s = document.createElement("small"); s.textContent = "ชิ้น"; q.appendChild(s);
   }
@@ -297,7 +337,9 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
       li.className = "item" + (name ? "" : " unknown");
       var t = document.createElement("div"); t.className = "t";
       var n = document.createElement("div"); n.className = "n" + (name ? "" : " none"); n.textContent = name || "ไม่พบในรายการสินค้า";
-      var c = document.createElement("div"); c.className = "c"; c.textContent = it.code;
+      var c = document.createElement("div"); c.className = "c";
+      var bd = document.createElement("span"); bd.className = "badge"; bd.textContent = it.size;
+      c.appendChild(bd); c.appendChild(document.createTextNode(it.code));
       var tm = document.createElement("div"); tm.className = "time"; tm.textContent = "ล่าสุด " + fmtTime(it.ts);
       t.appendChild(n); t.appendChild(c); t.appendChild(tm);
       var st = document.createElement("div"); st.className = "step";
@@ -318,6 +360,20 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     $("samples").hidden = state.items.length > 0;
     var own = Object.keys(state.catalog).length;
     $("catInfo").textContent = own ? ("แคตตาล็อก " + own + " รายการ") : "แคตตาล็อกตัวอย่าง " + Object.keys(SAMPLE).length + " รายการ";
+  }
+  function renderSizes() {
+    var w = $("sizes"); w.textContent = "";
+    SIZES.forEach(function (sz) {
+      var n = 0;
+      state.items.forEach(function (x) { if (x.size === sz) n += x.qty; });
+      var b = document.createElement("button"); b.type = "button"; b.className = "size";
+      b.setAttribute("aria-pressed", String(state.size === sz));
+      var t = document.createElement("b"); t.textContent = sz;
+      var c = document.createElement("small"); c.textContent = n + " ชิ้น";
+      b.appendChild(t); b.appendChild(c);
+      b.addEventListener("click", function () { setSize(sz, false); });
+      w.appendChild(b);
+    });
   }
   function renderChips() {
     var w = $("chips"); w.textContent = "";
@@ -349,9 +405,9 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   /* CSV */
   function csvCell(v) { v = String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
   function buildCsv() {
-    var rows = [["barcode", "ชื่อสินค้า", "จำนวน", "สแกนล่าสุด", "โซน"]];
+    var rows = [["barcode", "ชื่อสินค้า", "ขนาดกระดาษ", "จำนวน", "สแกนล่าสุด", "โซน"]];
     state.items.slice().reverse().forEach(function (it) {
-      rows.push([it.code, nameFor(it.code), it.qty, new Date(it.ts).toISOString(), state.zone]);
+      rows.push([it.code, nameFor(it.code), it.size, it.qty, new Date(it.ts).toISOString(), state.zone]);
     });
     return "﻿" + rows.map(function (r) { return r.map(csvCell).join(","); }).join("\r\n");
   }
@@ -368,6 +424,16 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   $("exportBtn").addEventListener("click", function () {
     if (!state.items.length) { showCsv("ยังไม่มีรายการให้ส่งออก"); return; }
     var data = buildCsv();
+    if (!(window.claude && window.claude.use)) {
+      try {
+        var blob = new Blob([data], { type: "text/csv;charset=utf-8" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = "scan-" + stamp() + ".csv";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+        return;
+      } catch (e) { showCsv(); return; }
+    }
     if (window.claude && window.claude.use) {
       window.claude.use("downloads").then(function (d) {
         if (!d) { showCsv(); return; }
@@ -430,7 +496,7 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     var b = $("clearBtn");
     if (b.dataset.armed === "1") {
       clearTimeout(clearTimer); b.dataset.armed = ""; b.textContent = "ล้างทั้งหมด";
-      state.items = []; save(); renderList();
+      state.items = []; save(); renderList(); renderSizes();
       $("result").className = "result"; $("rTag").textContent = "พร้อมสแกน";
       $("rName").textContent = "ยิงบาร์โค้ดสินค้าชิ้นแรก"; $("rCode").textContent = "ผลสแกนล่าสุดจะแสดงตรงนี้"; $("rQty").hidden = true;
       return;
@@ -467,11 +533,12 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     }, 80);
   });
 
-  load();
+  load(); migrate();
   $("zone").value = state.zone;
-  syncSound(); renderChips(); renderList();
+  syncSound(); renderChips(); renderSizes(); renderList();
   focusScan();
 })();
 </script>
 
-</body></html>
+</body>
+</html>
