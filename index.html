@@ -82,6 +82,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 #zone { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
 .linkrow { display: flex; flex-wrap: wrap; gap: 8px; }
 
+/* sync */
+.sync { display: flex; align-items: center; gap: 6px; background: transparent; border: 0; padding: 6px 4px; font-size: .72rem; color: var(--ink-2); min-height: 36px; text-align: right; }
+.sync i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
+.sync.ok i { background: var(--ok); }
+.sync.pending i { background: var(--warn); }
+.sync.err i { background: var(--danger); }
+.panel input[type=text], .panel input[type=url] { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; font-size: .9rem; }
+.panel label { font-size: .8rem; font-weight: 600; color: var(--ink-2); }
+.panel .fld { display: grid; gap: 4px; }
+
 /* paper size */
 .sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .size { min-height: 56px; border: 2px solid var(--line); border-radius: 8px; background: var(--surface); display: grid; place-items: center; padding: 4px; line-height: 1.1; }
@@ -147,6 +157,7 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 <body>
 <div class="bar"><div class="bar-in">
   <h1>สแกนสินค้า</h1>
+  <button class="sync" id="sync" type="button" aria-label="ตั้งค่า Google Sheet"><i></i><span id="syncTxt"></span></button>
   <div class="stat"><b id="cSku">0</b><span>รายการ</span></div>
   <div class="stat"><b id="cQty">0</b><span>ชิ้นรวม</span></div>
 </div></div>
@@ -188,6 +199,7 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   <div class="linkrow" style="margin-top:18px">
     <button class="btn primary" id="exportBtn" type="button">ส่งออก CSV</button>
     <button class="btn" id="impBtn" type="button">นำเข้ารายการสินค้า</button>
+    <button class="btn" id="sheetBtn" type="button">ตั้งค่า Sheet</button>
     <button class="btn" id="soundBtn" type="button" aria-pressed="true">เสียงบี๊บ: เปิด</button>
     <button class="btn ghost warn-btn" id="clearBtn" type="button">ล้างทั้งหมด</button>
   </div>
@@ -201,6 +213,23 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
       <button class="btn" id="csvClose" type="button">ปิด</button>
     </div>
     <span class="msg" id="csvMsg"></span>
+  </section>
+
+  <section class="panel" id="sheetPanel" hidden>
+    <h3>ตั้งค่า Google Sheet (ไม่บังคับ)</h3>
+    <p>ทุกครั้งที่สแกนหรือแก้จำนวน แอปจะส่งขึ้น Sheet เอง ถ้าสัญญาณหลุดจะเก็บไว้แล้วส่งใหม่ให้เมื่อเน็ตกลับมา</p>
+    <div class="fld"><label for="cfgUrl">ลิงก์ Web App (ขึ้นต้นด้วย https://script.google.com/...)</label>
+      <input type="text" id="cfgUrl" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec"></div>
+    <div class="fld"><label for="cfgToken">รหัสผ่าน (ตรงกับ TOKEN ในสคริปต์)</label>
+      <input type="text" id="cfgToken" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    <div class="fld"><label for="cfgDevice">ชื่อเครื่อง (แยกข้อมูลแต่ละ Handheld)</label>
+      <input type="text" id="cfgDevice" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="เช่น HH-01"></div>
+    <div class="row">
+      <button class="btn primary" id="cfgSave" type="button">บันทึกและทดสอบ</button>
+      <button class="btn" id="cfgSendAll" type="button">ส่งข้อมูลทั้งหมดอีกครั้ง</button>
+      <button class="btn" id="cfgClose" type="button">ปิด</button>
+    </div>
+    <span class="msg" id="cfgMsg"></span>
   </section>
 
   <section class="panel" id="impPanel" hidden>
@@ -221,6 +250,10 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 <script>
 (function () {
   "use strict";
+  // ===== ตั้งค่าครั้งเดียวตรงนี้ แล้วทุกเครื่องส่งขึ้น Google Sheet ได้เลยโดยไม่ต้องตั้งค่าเอง =====
+  var SHEET_URL = "";    // วางลิงก์ Web App ของ Apps Script ระหว่างเครื่องหมายคำพูด (ลงท้ายด้วย /exec)
+  var SHEET_TOKEN = "";  // รหัสผ่านเดียวกับ TOKEN ใน Code.gs
+  // ===================================================================================
   var LS = "scanpoint.v1";
   // Example catalog only. Replace by importing the real product list.
   var SAMPLE = {
@@ -232,7 +265,7 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     "8850000000067": "กระดาษทิชชู่ (แพ็ก 6 ม้วน)"
   };
   var SIZES = ["A3", "A4", "A5", "A6"];
-  var state = { items: [], catalog: {}, zone: "", sound: true, size: "A4" };
+  var state = { items: [], catalog: {}, zone: "", sound: true, size: "A4", cfg: { url: "", token: "", device: "" }, pending: {} };
   var lastRemoved = null, toastTimer = 0, clearTimer = 0, ctx = null;
 
   function $(id) { return document.getElementById(id); }
@@ -245,6 +278,8 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
         if (typeof s.zone === "string") state.zone = s.zone;
         if (typeof s.sound === "boolean") state.sound = s.sound;
         if (SIZES.indexOf(s.size) >= 0) state.size = s.size;
+        if (s.cfg && typeof s.cfg === "object") state.cfg = { url: String(s.cfg.url || ""), token: String(s.cfg.token || ""), device: String(s.cfg.device || "") };
+        if (s.pending && typeof s.pending === "object") state.pending = s.pending;
       }
     } catch (e) {}
   }
@@ -314,7 +349,7 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     var name = nameFor(code);
     showResult(code, name, it.qty, repeat, it.size);
     beep(!name);
-    save(); renderList(); renderSizes();
+    save(); renderList(); renderSizes(); enqueue(it, false);
   }
   function showResult(code, name, qty, repeat, size) {
     var box = $("result");
@@ -346,8 +381,8 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
       var minus = document.createElement("button"); minus.type = "button"; minus.textContent = "−"; minus.setAttribute("aria-label", "ลดจำนวน");
       var out = document.createElement("output"); out.textContent = String(it.qty);
       var plus = document.createElement("button"); plus.type = "button"; plus.textContent = "+"; plus.setAttribute("aria-label", "เพิ่มจำนวน");
-      minus.addEventListener("click", function () { if (it.qty > 1) { it.qty -= 1; save(); renderList(); } });
-      plus.addEventListener("click", function () { it.qty += 1; save(); renderList(); });
+      minus.addEventListener("click", function () { if (it.qty > 1) { it.qty -= 1; save(); renderList(); renderSizes(); enqueue(it, false); } });
+      plus.addEventListener("click", function () { it.qty += 1; save(); renderList(); renderSizes(); enqueue(it, false); });
       st.appendChild(minus); st.appendChild(out); st.appendChild(plus);
       var del = document.createElement("button"); del.type = "button"; del.className = "del"; del.textContent = "ลบรายการนี้";
       del.addEventListener("click", function () { removeItem(it); });
@@ -391,14 +426,14 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   function removeItem(it) {
     var idx = state.items.indexOf(it); if (idx < 0) return;
     state.items.splice(idx, 1); lastRemoved = { it: it, idx: idx };
-    save(); renderList();
+    save(); renderList(); renderSizes(); enqueue(it, true);
     $("toastText").textContent = "ลบรายการแล้ว";
     $("toast").hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { $("toast").hidden = true; lastRemoved = null; }, 6000);
   }
   $("toastBtn").addEventListener("click", function () {
-    if (lastRemoved) { state.items.splice(lastRemoved.idx, 0, lastRemoved.it); lastRemoved = null; save(); renderList(); }
+    if (lastRemoved) { state.items.splice(lastRemoved.idx, 0, lastRemoved.it); enqueue(lastRemoved.it, false); lastRemoved = null; save(); renderList(); renderSizes(); }
     $("toast").hidden = true; clearTimeout(toastTimer);
   });
 
@@ -484,6 +519,81 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     $("impText").value = "";
   });
 
+  /* Google Sheet sync (idempotent upsert, queued while offline) */
+  var flushing = false, flushTimer = 0, lastErr = "", lastOk = 0;
+  function pendingCount() { return Object.keys(state.pending).length; }
+  function renderSync() {
+    var b = $("sync"), t = $("syncTxt"), n = pendingCount();
+    var cls = "sync", txt;
+    if (!state.cfg.url) txt = "Sheet: ยังไม่เชื่อม";
+    else if (lastErr && n) { cls += " err"; txt = "ส่งไม่ได้ รอส่ง " + n; }
+    else if (n) { cls += " pending"; txt = "รอส่ง " + n; }
+    else { cls += " ok"; txt = "Sheet: ส่งแล้ว"; }
+    b.className = cls; t.textContent = txt;
+  }
+  function enqueue(it, del) {
+    if (!state.cfg.url) return;
+    var key = it.size + "|" + it.code;
+    state.pending[key] = { code: it.code, size: it.size, qty: del ? 0 : it.qty, name: nameFor(it.code), zone: state.zone, ts: Date.now() };
+    save(); renderSync(); scheduleFlush(1200);
+  }
+  function scheduleFlush(ms) { clearTimeout(flushTimer); flushTimer = setTimeout(flush, ms); }
+  function post(payload) {
+    var ctl = ("AbortController" in window) ? new AbortController() : null;
+    var to = setTimeout(function () { if (ctl) ctl.abort(); }, 25000);
+    return fetch(state.cfg.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload), redirect: "follow", signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { clearTimeout(to); return r.json(); })
+      .then(function (j) { if (!j || !j.ok) throw new Error((j && j.error) || "ตอบกลับไม่ถูกต้อง"); return j; }, function (e) { clearTimeout(to); throw e; });
+  }
+  function flush() {
+    if (flushing || !state.cfg.url) return;
+    var keys = Object.keys(state.pending);
+    if (!keys.length) { renderSync(); return; }
+    if (navigator.onLine === false) { lastErr = "ออฟไลน์"; renderSync(); scheduleFlush(15000); return; }
+    flushing = true;
+    var snap = keys.map(function (k) { return { k: k, ts: state.pending[k].ts, row: state.pending[k] }; });
+    post({ token: state.cfg.token, action: "upsert", device: state.cfg.device, rows: snap.map(function (x) { return x.row; }) })
+      .then(function () {
+        snap.forEach(function (x) { var cur = state.pending[x.k]; if (cur && cur.ts === x.ts) delete state.pending[x.k]; });
+        lastErr = ""; lastOk = Date.now(); save();
+      })
+      .catch(function (e) { lastErr = (e && e.message) || "error"; })
+      .then(function () {
+        flushing = false; renderSync();
+        if (pendingCount()) scheduleFlush(lastErr ? 15000 : 800);
+      });
+  }
+  window.addEventListener("online", function () { scheduleFlush(500); });
+  $("sync").addEventListener("click", openSheet);
+  $("sheetBtn").addEventListener("click", openSheet);
+  function openSheet() {
+    $("cfgUrl").value = state.cfg.url; $("cfgToken").value = state.cfg.token; $("cfgDevice").value = state.cfg.device;
+    $("cfgMsg").textContent = ""; $("sheetPanel").hidden = false; $("sheetPanel").scrollIntoView({ block: "nearest" });
+  }
+  $("cfgClose").addEventListener("click", function () { $("sheetPanel").hidden = true; focusScan(); });
+  function readCfg() {
+    state.cfg.url = $("cfgUrl").value.trim();
+    state.cfg.token = $("cfgToken").value.trim();
+    state.cfg.device = $("cfgDevice").value.trim() || state.cfg.device || "HH-01";
+    $("cfgDevice").value = state.cfg.device; save();
+  }
+  $("cfgSave").addEventListener("click", function () {
+    readCfg();
+    var m = $("cfgMsg");
+    if (!state.cfg.url) { m.textContent = "ปิดการส่งขึ้น Sheet แล้ว"; renderSync(); return; }
+    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(state.cfg.url)) { m.textContent = "ลิงก์ต้องขึ้นต้นด้วย https://script.google.com/ และลงท้ายด้วย /exec"; return; }
+    m.textContent = "กำลังทดสอบ...";
+    post({ token: state.cfg.token, action: "ping", device: state.cfg.device })
+      .then(function () { m.textContent = "เชื่อมต่อสำเร็จ"; lastErr = ""; renderSync(); scheduleFlush(300); })
+      .catch(function (e) { lastErr = "x"; m.textContent = "เชื่อมต่อไม่สำเร็จ: " + ((e && e.message) || "ตรวจลิงก์ การตั้งค่า Anyone และรหัสผ่าน"); renderSync(); });
+  });
+  $("cfgSendAll").addEventListener("click", function () {
+    readCfg();
+    if (!state.cfg.url) { $("cfgMsg").textContent = "ใส่ลิงก์ก่อน"; return; }
+    state.items.forEach(function (x) { enqueue(x, false); });
+    $("cfgMsg").textContent = "คิวส่งทั้งหมด " + state.items.length + " รายการ";
+  });
+
   /* controls */
   $("soundBtn").addEventListener("click", function () {
     state.sound = !state.sound; save(); syncSound();
@@ -496,6 +606,7 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     var b = $("clearBtn");
     if (b.dataset.armed === "1") {
       clearTimeout(clearTimer); b.dataset.armed = ""; b.textContent = "ล้างทั้งหมด";
+      state.items.forEach(function (x) { enqueue(x, true); });
       state.items = []; save(); renderList(); renderSizes();
       $("result").className = "result"; $("rTag").textContent = "พร้อมสแกน";
       $("rName").textContent = "ยิงบาร์โค้ดสินค้าชิ้นแรก"; $("rCode").textContent = "ผลสแกนล่าสุดจะแสดงตรงนี้"; $("rQty").hidden = true;
@@ -534,8 +645,11 @@ ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   });
 
   load(); migrate();
+  if (!state.cfg.url && SHEET_URL) { state.cfg.url = SHEET_URL; state.cfg.token = SHEET_TOKEN; }
+  if (!state.cfg.device) { state.cfg.device = "HH-" + Math.random().toString(36).slice(2, 5).toUpperCase(); save(); }
   $("zone").value = state.zone;
-  syncSound(); renderChips(); renderSizes(); renderList();
+  syncSound(); renderChips(); renderSizes(); renderList(); renderSync();
+  if (pendingCount()) scheduleFlush(1500);
   focusScan();
 })();
 </script>
