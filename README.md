@@ -1,2 +1,477 @@
-# scanst25
-สแกนขอป้ายราค
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>สแกนสินค้า</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one column for a handheld (about 360x640). Sticky counter bar, one large result card, then the scanned list.
+   Palette: warehouse paper and ink, one green for "found", amber for "not in catalog", red only for removal. */
+:root {
+  --bg: #f1f4f2;
+  --surface: #ffffff;
+  --surface-2: #e6ebe8;
+  --ink: #14201b;
+  --ink-2: #51605a;
+  --line: #cfd8d3;
+  --ok: #0a7a57;
+  --ok-bg: #d9efe5;
+  --warn: #9a5b00;
+  --warn-bg: #fbe9c9;
+  --danger: #b3261e;
+  --on-accent: #ffffff;
+  --font-ui: "Noto Sans Thai", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1512; --surface: #17211c; --surface-2: #213029; --ink: #e8f0ec; --ink-2: #9db0a7;
+    --line: #2d3c34; --ok: #3ccf9b; --ok-bg: #12382a; --warn: #f0b24a; --warn-bg: #3a2a0c;
+    --danger: #ff8a80; --on-accent: #06130d; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1512; --surface: #17211c; --surface-2: #213029; --ink: #e8f0ec; --ink-2: #9db0a7;
+  --line: #2d3c34; --ok: #3ccf9b; --ok-bg: #12382a; --warn: #f0b24a; --warn-bg: #3a2a0c;
+  --danger: #ff8a80; --on-accent: #06130d; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 16px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 24px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+.wrap { max-width: 640px; margin: 0 auto; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--ok); outline-offset: 2px; }
+
+/* top bar */
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface);
+  margin-inline: calc(-1 * max(16px, env(safe-area-inset-left, 0px))) ;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid var(--line);
+}
+.bar-in { max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+.bar h1 { font-size: 1rem; font-weight: 700; margin: 0; flex: 1; min-width: 0; letter-spacing: .01em; }
+.stat { text-align: right; }
+.stat b { display: block; font-family: var(--font-code); font-size: 1.25rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat span { font-size: .72rem; color: var(--ink-2); }
+
+/* scan input */
+.scanbox { margin-top: 14px; display: grid; gap: 8px; }
+.field-label { font-size: .8rem; font-weight: 600; color: var(--ink-2); letter-spacing: .04em; }
+.scan-row { display: flex; gap: 8px; }
+#scan {
+  flex: 1; min-width: 0; font-family: var(--font-code); font-size: 1.25rem; padding: 14px 14px;
+  background: var(--surface); color: var(--ink); border: 2px solid var(--ink); border-radius: 6px;
+}
+#scan::placeholder { color: var(--ink-2); font-family: var(--font-ui); font-size: 1rem; }
+.btn {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; min-height: 44px; font-weight: 500;
+}
+.btn:active { background: var(--surface-2); }
+.btn.primary { background: var(--ok); border-color: var(--ok); color: var(--on-accent); font-weight: 600; }
+.btn.ghost { background: transparent; }
+.btn.warn-btn { color: var(--danger); }
+.zone-row { display: flex; align-items: center; gap: 8px; }
+#zone { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.linkrow { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* result card */
+.result { margin-top: 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); padding: 16px; display: grid; gap: 6px; border-left-width: 8px; border-left-color: var(--line); }
+.result.ok { background: var(--ok-bg); border-color: var(--ok); }
+.result.warn { background: var(--warn-bg); border-color: var(--warn); }
+.result .tag { font-size: .8rem; font-weight: 700; letter-spacing: .05em; color: var(--ink-2); }
+.result.ok .tag { color: var(--ok); }
+.result.warn .tag { color: var(--warn); }
+.result .name { font-size: 1.35rem; font-weight: 700; line-height: 1.25; text-wrap: balance; overflow-wrap: anywhere; }
+.result .code { font-family: var(--font-code); font-size: 1rem; color: var(--ink-2); overflow-wrap: anywhere; }
+.result .qty { font-family: var(--font-code); font-size: 2.4rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.result .qty small { font-family: var(--font-ui); font-size: .85rem; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+
+/* sample chips */
+.samples { margin-top: 12px; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; }
+.samples p { margin: 0 0 8px; font-size: .85rem; color: var(--ink-2); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: .85rem; min-height: 36px; }
+
+/* list */
+.list-head { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 0 8px; gap: 8px; }
+.list-head h2 { margin: 0; font-size: 1rem; }
+.list-head span { font-size: .8rem; color: var(--ink-2); }
+ul.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.item { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; }
+.item.unknown { border-left: 5px solid var(--warn); }
+.item .t { min-width: 0; }
+.item .n { font-weight: 600; overflow-wrap: anywhere; }
+.item .n.none { color: var(--warn); font-weight: 500; }
+.item .c { font-family: var(--font-code); font-size: .8rem; color: var(--ink-2); overflow-wrap: anywhere; }
+.item .time { font-size: .72rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.step { display: flex; align-items: center; gap: 4px; }
+.step button { width: 40px; height: 40px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); font-size: 1.25rem; line-height: 1; padding: 0; }
+.step output { min-width: 2.2ch; text-align: center; font-family: var(--font-code); font-weight: 600; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.item .del { grid-column: 1 / -1; justify-self: end; background: transparent; border: 0; color: var(--ink-2); font-size: .8rem; padding: 4px 6px; text-decoration: underline; }
+.empty { text-align: center; padding: 28px 12px; color: var(--ink-2); border: 1px dashed var(--line); border-radius: 8px; }
+
+/* panels */
+.panel { margin-top: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; }
+.panel h3 { margin: 0; font-size: 1rem; }
+.panel p { margin: 0; font-size: .85rem; color: var(--ink-2); }
+.panel textarea { width: 100%; min-height: 120px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font-family: var(--font-code); font-size: .8rem; resize: vertical; }
+.panel .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.panel input[type=file] { font-size: .85rem; max-width: 100%; }
+.msg { font-size: .85rem; font-weight: 500; }
+
+.toast { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; background: var(--ink); color: var(--bg); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 640px; margin: 0 auto; }
+.toast button { background: transparent; border: 1px solid currentColor; color: inherit; border-radius: 6px; padding: 6px 12px; font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) { .result { transition: background-color .15s; } }
+</style>
+
+<div class="bar"><div class="bar-in">
+  <h1>สแกนสินค้า</h1>
+  <div class="stat"><b id="cSku">0</b><span>รายการ</span></div>
+  <div class="stat"><b id="cQty">0</b><span>ชิ้นรวม</span></div>
+</div></div>
+
+<main class="wrap">
+  <section class="scanbox" aria-label="ช่องสแกน">
+    <label class="field-label" for="scan">บาร์โค้ด</label>
+    <div class="scan-row">
+      <input id="scan" type="text" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="ยิงสแกนเนอร์ได้เลย" autofocus>
+      <button class="btn" id="kbBtn" type="button" aria-pressed="false">คีย์ด้วยมือ</button>
+    </div>
+    <div class="zone-row">
+      <label class="field-label" for="zone">โซน/เอกสาร</label>
+      <input id="zone" type="text" autocomplete="off" placeholder="เช่น ชั้น A-03 (ไม่บังคับ)">
+    </div>
+  </section>
+
+  <section id="result" class="result" aria-live="polite">
+    <div class="tag" id="rTag">พร้อมสแกน</div>
+    <div class="name" id="rName">ยิงบาร์โค้ดสินค้าชิ้นแรก</div>
+    <div class="code" id="rCode">ผลสแกนล่าสุดจะแสดงตรงนี้</div>
+    <div class="qty" id="rQty" hidden></div>
+  </section>
+
+  <section id="samples" class="samples">
+    <p>ทดลองโดยไม่ใช้สแกนเนอร์: แตะสินค้าตัวอย่างเพื่อจำลองการสแกน</p>
+    <div class="chips" id="chips"></div>
+  </section>
+
+  <div class="list-head">
+    <h2>รายการที่สแกนแล้ว</h2>
+    <span id="catInfo"></span>
+  </div>
+  <ul class="items" id="items"></ul>
+  <div class="empty" id="empty">ยังไม่มีรายการ สแกนสินค้าเพื่อเริ่มนับ</div>
+
+  <div class="linkrow" style="margin-top:18px">
+    <button class="btn primary" id="exportBtn" type="button">ส่งออก CSV</button>
+    <button class="btn" id="impBtn" type="button">นำเข้ารายการสินค้า</button>
+    <button class="btn" id="soundBtn" type="button" aria-pressed="true">เสียงบี๊บ: เปิด</button>
+    <button class="btn ghost warn-btn" id="clearBtn" type="button">ล้างทั้งหมด</button>
+  </div>
+
+  <section class="panel" id="csvPanel" hidden>
+    <h3>ข้อมูล CSV</h3>
+    <p id="csvNote">เครื่องนี้บันทึกไฟล์โดยตรงไม่ได้ กดคัดลอกแล้ววางลงใน Excel หรือ Google Sheets</p>
+    <textarea id="csvText" readonly></textarea>
+    <div class="row">
+      <button class="btn primary" id="csvCopy" type="button">คัดลอก</button>
+      <button class="btn" id="csvClose" type="button">ปิด</button>
+    </div>
+    <span class="msg" id="csvMsg"></span>
+  </section>
+
+  <section class="panel" id="impPanel" hidden>
+    <h3>นำเข้ารายการสินค้า</h3>
+    <p>หนึ่งบรรทัดต่อสินค้า รูปแบบ: บาร์โค้ด,ชื่อสินค้า (คั่นด้วยคอมมาหรือแท็บ) หรือเลือกไฟล์ .csv / .txt</p>
+    <textarea id="impText" placeholder="8850000000012,น้ำดื่ม 600 มล."></textarea>
+    <input type="file" id="impFile" accept=".csv,.txt,text/csv,text/plain">
+    <div class="row">
+      <button class="btn primary" id="impGo" type="button">นำเข้า</button>
+      <button class="btn" id="impClose" type="button">ปิด</button>
+    </div>
+    <span class="msg" id="impMsg"></span>
+  </section>
+</main>
+
+<div class="toast" id="toast" hidden><span id="toastText"></span><button type="button" id="toastBtn">เลิกทำ</button></div>
+
+<script>
+(function () {
+  "use strict";
+  var LS = "scanpoint.v1";
+  // Example catalog only. Replace by importing the real product list.
+  var SAMPLE = {
+    "8850000000012": "น้ำดื่ม 600 มล. (แพ็ก 12)",
+    "8850000000029": "ข้าวสารหอมมะลิ 5 กก.",
+    "8850000000036": "น้ำปลา 700 มล.",
+    "8850000000043": "บะหมี่กึ่งสำเร็จรูป รสต้มยำ",
+    "8850000000050": "ผงซักฟอก 2.4 กก.",
+    "8850000000067": "กระดาษทิชชู่ (แพ็ก 6 ม้วน)"
+  };
+  var state = { items: [], catalog: {}, zone: "", sound: true };
+  var lastRemoved = null, toastTimer = 0, clearTimer = 0, ctx = null;
+
+  function $(id) { return document.getElementById(id); }
+  function load() {
+    try {
+      var s = JSON.parse(localStorage.getItem(LS));
+      if (s && typeof s === "object") {
+        if (Array.isArray(s.items)) state.items = s.items;
+        if (s.catalog && typeof s.catalog === "object") state.catalog = s.catalog;
+        if (typeof s.zone === "string") state.zone = s.zone;
+        if (typeof s.sound === "boolean") state.sound = s.sound;
+      }
+    } catch (e) {}
+  }
+  function save() { try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) {} }
+  function nameFor(code) {
+    if (Object.prototype.hasOwnProperty.call(state.catalog, code)) return state.catalog[code];
+    if (Object.prototype.hasOwnProperty.call(SAMPLE, code)) return SAMPLE[code];
+    return "";
+  }
+  function fmtTime(ts) {
+    try { return new Date(ts).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+    catch (e) { return ""; }
+  }
+
+  /* feedback */
+  function beep(bad) {
+    if (state.sound) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) {
+          ctx = ctx || new AC();
+          if (ctx.state === "suspended") ctx.resume();
+          var seq = bad ? [[330, 0], [330, 0.2]] : [[1040, 0]];
+          seq.forEach(function (n) {
+            var o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime + n[1];
+            o.type = "square"; o.frequency.value = n[0];
+            g.gain.setValueAtTime(0.0001, t);
+            g.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+            o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.16);
+          });
+        }
+      } catch (e) {}
+    }
+    try { if (navigator.vibrate) navigator.vibrate(bad ? [90, 60, 90] : 40); } catch (e) {}
+  }
+
+  /* scan */
+  function onScan(raw) {
+    var code = String(raw || "").replace(/[\r\n\t]/g, "").trim();
+    if (!code) return;
+    var it = null, i;
+    for (i = 0; i < state.items.length; i++) if (state.items[i].code === code) { it = state.items[i]; break; }
+    var repeat = !!it;
+    if (it) { it.qty += 1; it.ts = Date.now(); }
+    else { it = { code: code, qty: 1, ts: Date.now() }; }
+    state.items = [it].concat(state.items.filter(function (x) { return x !== it; }));
+    var name = nameFor(code);
+    showResult(code, name, it.qty, repeat);
+    beep(!name);
+    save(); renderList();
+  }
+  function showResult(code, name, qty, repeat) {
+    var box = $("result");
+    box.className = "result " + (name ? "ok" : "warn");
+    $("rTag").textContent = name ? (repeat ? "สแกนซ้ำ +1" : "เพิ่มรายการใหม่") : "ไม่พบในรายการสินค้า";
+    $("rName").textContent = name || "สินค้าไม่มีชื่อในระบบ";
+    $("rCode").textContent = code;
+    var q = $("rQty"); q.hidden = false; q.textContent = String(qty);
+    var s = document.createElement("small"); s.textContent = "ชิ้น"; q.appendChild(s);
+  }
+
+  /* render */
+  function renderList() {
+    var ul = $("items"); ul.textContent = "";
+    var total = 0;
+    state.items.forEach(function (it) {
+      total += it.qty;
+      var name = nameFor(it.code);
+      var li = document.createElement("li");
+      li.className = "item" + (name ? "" : " unknown");
+      var t = document.createElement("div"); t.className = "t";
+      var n = document.createElement("div"); n.className = "n" + (name ? "" : " none"); n.textContent = name || "ไม่พบในรายการสินค้า";
+      var c = document.createElement("div"); c.className = "c"; c.textContent = it.code;
+      var tm = document.createElement("div"); tm.className = "time"; tm.textContent = "ล่าสุด " + fmtTime(it.ts);
+      t.appendChild(n); t.appendChild(c); t.appendChild(tm);
+      var st = document.createElement("div"); st.className = "step";
+      var minus = document.createElement("button"); minus.type = "button"; minus.textContent = "−"; minus.setAttribute("aria-label", "ลดจำนวน");
+      var out = document.createElement("output"); out.textContent = String(it.qty);
+      var plus = document.createElement("button"); plus.type = "button"; plus.textContent = "+"; plus.setAttribute("aria-label", "เพิ่มจำนวน");
+      minus.addEventListener("click", function () { if (it.qty > 1) { it.qty -= 1; save(); renderList(); } });
+      plus.addEventListener("click", function () { it.qty += 1; save(); renderList(); });
+      st.appendChild(minus); st.appendChild(out); st.appendChild(plus);
+      var del = document.createElement("button"); del.type = "button"; del.className = "del"; del.textContent = "ลบรายการนี้";
+      del.addEventListener("click", function () { removeItem(it); });
+      li.appendChild(t); li.appendChild(st); li.appendChild(del);
+      ul.appendChild(li);
+    });
+    $("cSku").textContent = String(state.items.length);
+    $("cQty").textContent = String(total);
+    $("empty").hidden = state.items.length > 0;
+    $("samples").hidden = state.items.length > 0;
+    var own = Object.keys(state.catalog).length;
+    $("catInfo").textContent = own ? ("แคตตาล็อก " + own + " รายการ") : "แคตตาล็อกตัวอย่าง " + Object.keys(SAMPLE).length + " รายการ";
+  }
+  function renderChips() {
+    var w = $("chips"); w.textContent = "";
+    Object.keys(SAMPLE).forEach(function (code) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = SAMPLE[code];
+      b.addEventListener("click", function () { onScan(code); });
+      w.appendChild(b);
+    });
+    var u = document.createElement("button"); u.type = "button"; u.className = "chip"; u.textContent = "บาร์โค้ดที่ไม่รู้จัก";
+    u.addEventListener("click", function () { onScan("0000000000000"); });
+    w.appendChild(u);
+  }
+
+  /* remove + undo */
+  function removeItem(it) {
+    var idx = state.items.indexOf(it); if (idx < 0) return;
+    state.items.splice(idx, 1); lastRemoved = { it: it, idx: idx };
+    save(); renderList();
+    $("toastText").textContent = "ลบรายการแล้ว";
+    $("toast").hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { $("toast").hidden = true; lastRemoved = null; }, 6000);
+  }
+  $("toastBtn").addEventListener("click", function () {
+    if (lastRemoved) { state.items.splice(lastRemoved.idx, 0, lastRemoved.it); lastRemoved = null; save(); renderList(); }
+    $("toast").hidden = true; clearTimeout(toastTimer);
+  });
+
+  /* CSV */
+  function csvCell(v) { v = String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function buildCsv() {
+    var rows = [["barcode", "ชื่อสินค้า", "จำนวน", "สแกนล่าสุด", "โซน"]];
+    state.items.slice().reverse().forEach(function (it) {
+      rows.push([it.code, nameFor(it.code), it.qty, new Date(it.ts).toISOString(), state.zone]);
+    });
+    return "﻿" + rows.map(function (r) { return r.map(csvCell).join(","); }).join("\r\n");
+  }
+  function stamp() {
+    var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes());
+  }
+  function showCsv(note) {
+    $("csvText").value = buildCsv().replace(/^﻿/, "");
+    if (note) $("csvNote").textContent = note;
+    $("csvMsg").textContent = ""; $("csvPanel").hidden = false;
+    $("csvPanel").scrollIntoView({ block: "nearest" });
+  }
+  $("exportBtn").addEventListener("click", function () {
+    if (!state.items.length) { showCsv("ยังไม่มีรายการให้ส่งออก"); return; }
+    var data = buildCsv();
+    if (window.claude && window.claude.use) {
+      window.claude.use("downloads").then(function (d) {
+        if (!d) { showCsv(); return; }
+        return d.save({ filename: "scan-" + stamp() + ".csv", data: data }).catch(function (e) {
+          if (e && e.code === "declined") return;
+          showCsv();
+        });
+      }).catch(function () { showCsv(); });
+    } else showCsv();
+  });
+  $("csvCopy").addEventListener("click", function () {
+    var ta = $("csvText"), ok = false;
+    function done(good) { $("csvMsg").textContent = good ? "คัดลอกแล้ว" : "คัดลอกไม่สำเร็จ ให้กดค้างที่ข้อความแล้วเลือกคัดลอก"; }
+    ta.focus(); ta.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(function () { done(true); }, function () { try { ok = document.execCommand("copy"); } catch (e) {} done(ok); });
+    } else { try { ok = document.execCommand("copy"); } catch (e) {} done(ok); }
+  });
+  $("csvClose").addEventListener("click", function () { $("csvPanel").hidden = true; focusScan(); });
+
+  /* import catalog */
+  function parseCatalog(text) {
+    var added = 0, map = {};
+    text.replace(/^﻿/, "").split(/\r?\n/).forEach(function (line, i) {
+      line = line.trim(); if (!line) return;
+      var m = line.match(/^("?)([^",\t]+)\1\s*[,\t]\s*(.*)$/);
+      if (!m) return;
+      var code = m[2].trim(), name = m[3].trim().replace(/^"(.*)"$/, "$1");
+      if (i === 0 && /barcode|บาร์โค้ด|รหัส/i.test(code)) return;
+      if (code && name) { map[code] = name; added++; }
+    });
+    return { map: map, count: added };
+  }
+  $("impBtn").addEventListener("click", function () { $("impPanel").hidden = false; $("impMsg").textContent = ""; $("impPanel").scrollIntoView({ block: "nearest" }); });
+  $("impClose").addEventListener("click", function () { $("impPanel").hidden = true; focusScan(); });
+  $("impFile").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () { $("impText").value = String(r.result || ""); };
+    r.readAsText(f);
+  });
+  $("impGo").addEventListener("click", function () {
+    var res = parseCatalog($("impText").value);
+    if (!res.count) { $("impMsg").textContent = "ไม่พบข้อมูลที่อ่านได้ ตรวจรูปแบบ บาร์โค้ด,ชื่อสินค้า"; return; }
+    Object.keys(res.map).forEach(function (k) { state.catalog[k] = res.map[k]; });
+    save(); renderList();
+    $("impMsg").textContent = "นำเข้า " + res.count + " รายการแล้ว";
+    $("impText").value = "";
+  });
+
+  /* controls */
+  $("soundBtn").addEventListener("click", function () {
+    state.sound = !state.sound; save(); syncSound();
+  });
+  function syncSound() {
+    var b = $("soundBtn"); b.textContent = "เสียงบี๊บ: " + (state.sound ? "เปิด" : "ปิด");
+    b.setAttribute("aria-pressed", String(state.sound));
+  }
+  $("clearBtn").addEventListener("click", function () {
+    var b = $("clearBtn");
+    if (b.dataset.armed === "1") {
+      clearTimeout(clearTimer); b.dataset.armed = ""; b.textContent = "ล้างทั้งหมด";
+      state.items = []; save(); renderList();
+      $("result").className = "result"; $("rTag").textContent = "พร้อมสแกน";
+      $("rName").textContent = "ยิงบาร์โค้ดสินค้าชิ้นแรก"; $("rCode").textContent = "ผลสแกนล่าสุดจะแสดงตรงนี้"; $("rQty").hidden = true;
+      return;
+    }
+    b.dataset.armed = "1"; b.textContent = "แตะอีกครั้งเพื่อล้างทั้งหมด";
+    clearTimer = setTimeout(function () { b.dataset.armed = ""; b.textContent = "ล้างทั้งหมด"; }, 3000);
+  });
+  $("zone").addEventListener("input", function (e) { state.zone = e.target.value; save(); });
+
+  /* scanner input: hardware scanners type the code then send Enter (some send Tab) */
+  var scan = $("scan"), kb = false;
+  scan.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === "Tab") {
+      var v = scan.value; scan.value = "";
+      if (v.trim()) { e.preventDefault(); onScan(v); }
+      else if (e.key === "Enter") e.preventDefault();
+    }
+  });
+  $("kbBtn").addEventListener("click", function () {
+    kb = !kb; scan.setAttribute("inputmode", kb ? "text" : "none");
+    $("kbBtn").setAttribute("aria-pressed", String(kb));
+    $("kbBtn").textContent = kb ? "ซ่อนแป้นพิมพ์" : "คีย์ด้วยมือ";
+    scan.blur(); scan.focus();
+  });
+  function focusScan() { try { scan.focus({ preventScroll: true }); } catch (e) { scan.focus(); } }
+  document.addEventListener("click", function (e) {
+    if (e.target.closest("textarea, input, #kbBtn")) return;
+    setTimeout(focusScan, 0);
+  });
+  scan.addEventListener("blur", function () {
+    setTimeout(function () {
+      var a = document.activeElement;
+      if (!a || a === document.body) focusScan();
+    }, 80);
+  });
+
+  load();
+  $("zone").value = state.zone;
+  syncSound(); renderChips(); renderList();
+  focusScan();
+})();
+</script>
+
+</body></html>
